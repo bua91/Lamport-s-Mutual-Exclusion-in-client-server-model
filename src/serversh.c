@@ -1,7 +1,6 @@
 /*
- * FILE NAME: p2psh.c
+ * FILE NAME: lmush.c
  * OWNER: ARUNABHA CHAKRABORTY
- * 	  AMAN SACHAN
  */
 #include <stdio.h>
 #include <string.h>
@@ -9,7 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
-#include "p2psh.h"
+#include "lmu.h"
 
 #define TOK_BUFF_SIZE 128
 #define TOK_DELIMITER " \t\r\n\a"
@@ -17,79 +16,51 @@
 /* 
  *Function decleration for built in functions
  */
-int p2psh_cd(char **args);
-int p2psh_help(char **args);
-int p2psh_exit(char **args);
-
-#if 0
-/*
- * List of built in cmd strings and there corresponding function callbacks.
- */
-char *built_in_cmd_str[] = {
-	"cd",
-	"help",
-	"exit"
-};
-
-int (*built_in_cmd_fun_callbacks[]) (char **) = {
-	&p2psh_cd,
-    	&p2psh_help,
-      	&p2psh_exit
-};
-
-/*
- * Number of buil in cmds
- */
-int p2psh_num_built_in(){
-	return sizeof(built_in_cmd_str) / sizeof(char *);
-}
-#endif
+int lmush_cd(char **args);
+int lmush_help(char **args);
+int lmush_exit(char **args);
 
 /*
  * Built in function implementations.
  * ************************************************************
  * ************************************************************
- * NAME: p2psh_help
+ * NAME: lmush_help
  * PURPOSE: Display help string for built in cmds.
  */
-int p2psh_help(char **args)
+int lmush_help(char **args)
 {
-	printf("P2PSH SUPPORTED BUILT IN COMANDS\n");
+	printf("LMUSH SUPPORTED BUILT IN COMANDS\n");
 	printf("help                                   Displayes the helpline\n");
 	printf("cd                                     Changes directory\n");
-	printf("peer <IP_ADDRESS> <PORT>               To peer with a neighbor. Please use port 9000 for peering\n");
-	printf("publish <filename>                     To publish the file\n");
-	printf("unpublish <hash>                       To unpublish the file corresponding to the hash\n");
-	printf("show peers                             To show the peer table\n");
-	printf("show metadata                          To show the metadata and endpoint information\n");
-	printf("show published                         To show the metadata information currently being published\n");
+	printf("enquiry                                To fetch details about the hosted files. Issued by clients\n");
+	printf("show hosted-files                      To show the list of files hosted by the servers\n");
 	printf("exit                                   Exit p2psh\n");
 	return 1;
 }
 
 /*
- * NAME: p2psh_cd
+ * NAME: lmush_cd
  * PURPOSE: change directory
  */
-int p2psh_cd(char **args)
+int lmush_cd(char **args)
 {
 	if (args[1] == NULL){
-		fprintf(stderr, "p2psh: Expected argument to cd!!\n");
+		fprintf(stderr, "lmush: Expected argument to cd!!\n");
 	}
 	else{
 		if(chdir(args[1]) !=0){
-			perror("p2psh");
+			perror("lmush");
 		}
 	}
 	return 1;
 }
 
 /*
- * NAME: p2psh_exit
- * PURPOSE: To exit from p2psh shell.
+ * NAME: lmush_exit
+ * PURPOSE: To exit from lmush shell.
  * WARNING: All configurations will be gone.
  */
-int p2psh_exit(char **args)
+int lmush_exit(char **args)
 {
 	return 0;
 }
@@ -118,7 +89,7 @@ char ** parse_line(char *line)
 	char *token;
 	char **cmd_arguments = malloc(buff_size * sizeof(char*));
 	if(!cmd_arguments){
-		fprintf(stderr, "p2psh: allocation error!!\n");
+		fprintf(stderr, "lmush: allocation error!!\n");
 		exit(EXIT_FAILURE);
 	}
 	token = strtok(line, TOK_DELIMITER);
@@ -130,7 +101,7 @@ char ** parse_line(char *line)
 			buff_size += TOK_BUFF_SIZE;
 			cmd_arguments = realloc(cmd_arguments, buff_size*sizeof(char*));
 			if (!cmd_arguments){
-			 	fprintf(stderr, "p2psh: allocation error!!\n");
+			 	fprintf(stderr, "lmush: allocation error!!\n");
 			 	exit(EXIT_FAILURE);
 			}
 		}
@@ -154,12 +125,12 @@ int cmd_launch(char **args)
   	pid = fork();
   	if (pid < 0){
 		 // Error forking
-		 perror("p2psh");
+		 perror("lmush");
   	}
   	else if (pid == 0){
   		// Child process
     		if (execvp(args[0], args) == -1){
-			perror("p2psh");
+			perror("lmush");
 		}
 		exit(EXIT_FAILURE);
   	}
@@ -171,26 +142,6 @@ int cmd_launch(char **args)
   	}	
   	return 1;
 }
-
-#if 0
-int peerconnect(char *ip_address, char *port_number)
-{
-	//pthread_t tid;
-	//pthread_create(&tid, NULL, peer_connect, (void *)ip_address);
-	pid_t pid;
-	pid = fork();
-	if (pid < 0){
-		fprintf(stderr, "p2psh: fork failed for client!!\n");
-		return 1;
-	}
-	else if (pid == 0){
-		peer_connect(ip_address, port_number);
-	}
-	else {
-		return 1;
-	}
-}
-#endif
 
 /*
  * NAME: cmd_execute
