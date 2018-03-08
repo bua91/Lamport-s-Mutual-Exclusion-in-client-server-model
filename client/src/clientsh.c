@@ -13,12 +13,6 @@
 #define TOK_BUFF_SIZE 128
 #define TOK_DELIMITER " \t\r\n\a"
 
-/*
- * global variables
- */
-pthread_t ptid[10];
-int num = 1;
-
 /* 
  *Function decleration for built in functions
  */
@@ -40,7 +34,8 @@ int clientsh_help(char **args)
 	printf("cd                                     Changes directory\n");
 	printf("show hosted-files                      To show the list of files hosted by the servers\n");
 	printf("peer <IP_ADDRESS> <PORT>               To peer with clients as well as server. Please use port 9000 for peering\n");
-	printf("start                                  To start the sending of information to the server files considering lamport mutual exclusion\n");
+	printf("total connections                      show total number of connections\n");
+//	printf("start                                  To start the sending of information to the server files considering lamport mutual exclusion\n");
 	printf("exit                                   Exit clientsh\n");
 	return 1;
 }
@@ -150,6 +145,7 @@ int cmd_launch(char **args)
   	return 1;
 }
 
+#if 0
 /*
  * Thread handler for send
  */
@@ -171,6 +167,7 @@ int start()
 	}
 	return 1
 }
+#endif
 
 /*
  * NAME: cmd_execute
@@ -191,14 +188,18 @@ int cmd_execute (char **args)
 	else if (strcmp (args[0], "exit") == 0){
 		return (clientsh_exit(args));
 	}
-	else if (strcmp (args[0], "peer")){
-		return (connect(args[1]));
+	else if (strcmp (args[0], "peer") == 0){
+		return (cli_server_connect(args[1]));
 	}
-	else if (strcmp (args[0], "start")){
+	/*else if (strcmp (args[0], "start")){
 		return (start());
-	}
+	}*/
 	else if (strcmp (args[0], "show") == 0){
 		return (show_hosted_files());
+	}
+	else if (strcmp (args[0], "total") == 0){
+		printf("total connections = %d\n", no_of_conn);
+		return 1;
 	}
 	return (cmd_launch(args));
 }
@@ -208,7 +209,7 @@ int cmd_execute (char **args)
  */
 int show_hosted_files()
 {
-	printf("\ttest1.txt\n\ttest2.txt");
+	printf("\ttest1.txt\n\ttest2.txt\n");
 	return 1;
 }
 
@@ -223,14 +224,15 @@ void * peer_conn(void * arg)
 /*
  * Function to start a new thread for handling the peer client connection
  */
-int connect( char *ip_addr)
+int cli_server_connect( char *ip_addr)
 {
-	pthread_t local_ptid = ptid[num];
+	pthread_t local_ptid;
 	int err;
 	err = pthread_create(&local_ptid,NULL,peer_conn,(void *)ip_addr );
 	if (err != 0){
 		fprintf(stderr,"clientsh: client thread creation error!!\n");
 	}
+	ptid[num] = local_ptid;
 	num++;
 	return 1;
 }
@@ -240,12 +242,19 @@ int connect( char *ip_addr)
  */
 int initialize()
 {
+	int i;
 	head = NULL;
 	local_clock = 1;
-	int n =0;
 	for (i =0; i<3; i++){
 		server_fds[i] = 0;
 	}
+	num = 1;
+	max_clients = 10;
+	no_of_conn = 0;
+	peer_cli_replies = 0;
+	release_sent = 1;
+	local_clock_send_timer = 0;
+	file_no = 1;
 	return 1;
 }
 
@@ -277,7 +286,7 @@ int main(int argc, char **argv)
 	/* Run local server in a new thread upon starting clientsh*/
 	err = pthread_create(&tid, NULL, local_server, NULL);
 	if (err != 0 ){
-		fprintf(stderri, "clientsh: server thread creation error");
+		fprintf(stderr, "clientsh: server thread creation error!!\n");
 	}
 	/* Start the shell and execute comands*/
         do{

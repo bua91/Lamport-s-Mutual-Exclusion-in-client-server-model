@@ -13,6 +13,7 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
 #include "server.h"
 
 /*
@@ -27,6 +28,11 @@ int server()
 	fd_set readfds;
 	int max_fd;
 	int i = 0;
+	FILE *fp;
+	char send_buffer[1024] = {0};
+	char recv_buffer[1024] = {0};
+	strcpy(send_buffer, "server");
+	int activity;
 	
 	//Inotialize all client socket fds to 0.
 	for (i = 0; i < max_clients; i++){
@@ -57,6 +63,7 @@ int server()
 		return 0;
 	}
 	
+	printf("server started\n\n");
 
 	while(1){
 		//clear the socket set and add the master socket to the set
@@ -90,8 +97,14 @@ int server()
 				fprintf(stderr, "serversh: Error in accept!!\n");
 				return 0;
 			}
-			 //send list of files hosted to the client
-			
+			if (read(new_conn_fd, recv_buffer, 1024) < 0){
+				fprintf(stderr, "serversh: Error in reading hello from client!!\n");
+			}
+			if (!strcmp(recv_buffer, "hello")){
+				if (send(new_conn_fd, send_buffer, strlen(send_buffer), 0) < 0){
+					fprintf(stderr,"serversh: error in sending reply to the other client's hello msg!!\n");
+				}
+			}
 			 //add the new connection fd to the client connection fd list
 			 for (i = 0; i < max_clients; i++){
 			 	//check for empty slot
@@ -99,14 +112,43 @@ int server()
 					cli_conn_fds[i] = new_conn_fd;
 					break;
 				}
+			}
+			memset(recv_buffer, 0, sizeof(recv_buffer));
+			memset(recv_buffer, 0, sizeof(send_buffer));
 		}
 		//else its some IO operation for already connected clients
 		else{
 			for (i = 0; i < max_clients; i++){
 				if (FD_ISSET(cli_conn_fds[i], &readfds)){
-					rd = read(cli_conn_fds[i], recv_buffer, 1024);
-					parse(recv_buffer);
-					send(cli_conn_fds[i], send_buffer, strlen(sennd_buffer), 0);
+					if (read(cli_conn_fds[i], recv_buffer, 1024) <0){
+						fprintf(stderr, "serversh: Error in reading message from client!!\n");
+					}
+					char *token;
+					int m =0;
+					char file_name[10];
+					char write_string[100];
+					token = strtok(recv_buffer, " ");
+					strcpy(file_name, token);
+					while (token != NULL){
+						if (m == 1){
+							strcpy(write_string, token);
+							strcat(write_string, " ");
+						}
+						if (m == 2){
+							strcat(write_string, token);
+						}
+						m++;
+						token = strtok(NULL, " ");
+					}
+					if (!strncmp(file_name, "test1", 5)){
+						fp = fopen("server1_files/test1.txt", "a+");
+					}
+					else{
+						fp = fopen("server1_files/test2.txt", "a+");
+					}
+					fprintf(fp, "%s\n", write_string);
+					fclose(fp);
+					//send(cli_conn_fds[i], send_buffer, strlen(sennd_buffer), 0);
 					//read write data to file
 				}
 			}

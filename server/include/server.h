@@ -10,7 +10,7 @@ struct files_hosted{
 	char * filename;
 	char * last_line;
 	struct files_hosted * next;
-}
+};
 // Function prototypes
 int server();
 

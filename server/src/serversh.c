@@ -172,7 +172,7 @@ int cmd_execute (char **args)
  */
 int show_hosted_files()
 {
-	printf("\ttest1.txt\n\ttest2.txt");
+	printf("\ttest1.txt\n\ttest2.txt\n");
 	return 1;
 }
 

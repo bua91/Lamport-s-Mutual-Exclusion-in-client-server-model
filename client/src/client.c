@@ -13,15 +13,67 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
 #include "client.h"
 
-//Global variables
-fd_set readfds;
-int max_clients = 10;
-int cli_conn_fds[10];
-int max_fd;
-int no_of_conn = 0;
-int peer_replies = 0;
+/*
+ * Insert remote client data to request queue
+ */
+int insert_into_request_queue(char * t_hstnm, char * t_tmstmp)
+{
+	struct request *temp = (struct request*) malloc(sizeof(struct request));
+	long int t = atoi(t_tmstmp);
+	if (t == 0){
+		return 0;
+	}
+	strcpy(temp->cli_id, t_hstnm);
+	temp->t_stamp = t;
+	temp->next = head;
+	head = temp;
+	
+	//update the local clock
+	if (local_clock >= t){
+		local_clock += 1;
+	}
+	else if (local_clock < t){
+		local_clock = t+1;
+	}
+	return 1;
+}
+
+/*
+ * delete data from request queue
+ */
+int delete_from_request_queue(char * t_hstnm, char * t_tmstmp)
+{
+	struct request *temp = head;
+	struct request *prev = head;
+	if (temp == NULL){
+		fprintf(stderr, "clientsh: no nodes in the request list!!\n");
+	}
+	//if only one node or first node to be deleted
+	else if ((temp->next == NULL) || (!strcmp(temp->cli_id, t_hstnm))){
+		if (!strcmp(temp->cli_id, t_hstnm)){
+			head = head->next;
+			temp->next = NULL;
+		}
+	}
+	else {
+		temp = temp->next;
+		while (temp != NULL){
+			if (!strcmp(temp->cli_id, t_hstnm)){
+				prev->next = temp->next;
+				temp->next = NULL;
+			}
+			prev = temp;
+			temp = temp->next;
+		}
+	}
+	//update the local clock
+	local_clock ++;
+
+	return 1;
+}
 
 /*
  * server part of the client
@@ -32,11 +84,16 @@ int server()
 	struct sockaddr_in server_addr, cli_addr;
 	socklen_t cli_len;
 	int i = 0;
+	int max_fd, activity;
+	char send_buffer[1024] = {0};
+	char recv_buffer[1024] = {0};
+	strcpy(send_buffer, "client");
 	
 	//Inotialize all client socket fds to 0.
 	for (i = 0; i < max_clients; i++){
 		cli_conn_fds[i] = 0;
 	}
+
 	
 	//Open a socket connection
 	if ((master_sock_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
@@ -93,35 +150,108 @@ int server()
 		if (FD_ISSET(master_sock_fd, &readfds)){
 			if ((new_conn_fd = accept(master_sock_fd, (struct sockaddr *)&cli_addr, &cli_len))<0){
 				fprintf(stderr, "clientsh(SERVER CODE): Error in accept!!\n");
-				return 0;
 			}
 
-			no_of_conn++;
+			if (read(new_conn_fd, recv_buffer, 1024) < 0){
+				fprintf(stderr, "clientsh(SERVER CODE): Error in reading hello from client!!\n");
+			}
+
+			if (!strcmp(recv_buffer, "hello")){
+				//send "client" message as a reply to the hello message from other client
+				if (send(new_conn_fd, send_buffer, strlen(send_buffer), 0) < 0){
+					fprintf(stderr,"clientsh (SERVER CODE): error in sending reply to the other client's hello msg!!\n");
+				}
+			}
 			 
-			 //add the new connection fd to the client connection fd list
-			 for (i = 0; i < max_clients; i++){
+			//add the new connection fd to the client connection fd list
+			for (i = 0; i < max_clients; i++){
 			 	//check for empty slot
 				if (cli_conn_fds[i] == 0){
 					cli_conn_fds[i] = new_conn_fd;
 					break;
 				}
 			}
+			// At last clear the recv and send buffer so that it can be used later
+			memset(recv_buffer, 0, sizeof(recv_buffer));
+			memset(send_buffer, 0, sizeof(send_buffer));
 		}
 		//else its some IO operation for already connected clients
 		else{
 			for (i = 0; i < max_clients; i++){
 				if (FD_ISSET(cli_conn_fds[i], &readfds)){
-					//read write data to file
-				}
-			}
+					if(read(cli_conn_fds[i], recv_buffer, 1024) < 0){
+					        fprintf(stderr, "clientsh(SERVER CODE): Error in reading hello from client!!\n");
+			                }
+					if (!strncmp(recv_buffer, "req", 3)){
+						//parse recv buffer
+						char *token;
+						int m =0;
+						char temp_hostname[30];
+						char temp_timestamp[30];
+						char ck[30];
+						token = strtok (recv_buffer, " ");
+						while(token != NULL){
+							if (m == 1){
+								strcpy(temp_hostname, token);
+							}
+							else if (m == 2){
+								strcpy(temp_timestamp, token);
+							}
+							m++;
+							token = strtok (NULL, " ");
+						}
 
+						//insert remote client request to the request queue and increment the local clock
+						if (!insert_into_request_queue(temp_hostname, temp_timestamp)){
+							fprintf(stderr, "clientsh(SERVER CODE): error in inserting remote request to queue!!\n");
+						}
+
+						//send "reply" message to the requesting client
+						strcpy(send_buffer, "reply ");
+						sprintf(ck, "%ld", local_clock);
+						strcat(send_buffer, ck);
+						if (send(cli_conn_fds[i], send_buffer, strlen(send_buffer), 0) < 0){
+							fprintf(stderr,"clientsh (SERVER CODE): error in sending reply to the other client's REQUEST msg!!\n");
+						}
+					}
+					else if (!strncmp(recv_buffer, "rel", 3)){
+						//parse the recv buffer
+						char *token;
+						int m =0;
+						char temp_hostname[30];
+						char temp_timestamp[30];
+						token = strtok(recv_buffer, " ");
+						while(token != NULL){
+							if (m == 1){
+								strcpy(temp_hostname, token);
+							}
+							else if (m == 2){
+								strcpy(temp_timestamp, token);
+							}
+							m++;
+							token = strtok(NULL, " ");
+						}
+
+						//delete data from request queue
+						if (!delete_from_request_queue(temp_hostname, temp_timestamp)){
+							fprintf(stderr, "clientsh(SERVER CODE): error in inserting remote request to queue!!\n");
+						}
+					}
+				}
+   			}
+                        memset(recv_buffer, 0, sizeof(recv_buffer));
+	                memset(send_buffer, 0, sizeof(send_buffer));
 		}
 	}
 
 	return 1;
 }
 
-int is_client_server_socket( int sock_fd)
+/*
+ * This function checks if the socket represented by the sock_fd is client to server
+ * socket or not
+ */
+int is_client_to_server_socket( int sock_fd)
 {
 	int m = 0;
 	int ret = 0;
@@ -134,17 +264,44 @@ int is_client_server_socket( int sock_fd)
 }
 
 /*
+ * This fuction checks if the local request is at the head of the queue
+ */
+int is_local_request_head_of_queue()
+{
+	//check if local request is head of queue.
+	struct request * temp = head;
+	char temp_host[30];
+	char hostname[30];
+	long int min = temp->t_stamp;
+	strcpy(temp_host, temp->cli_id);
+	temp = temp->next;
+	while (temp != NULL){
+		if (temp->cli_id < min){
+			min = temp->t_stamp;
+			strcpy(temp_host, temp->cli_id);
+		}
+		temp = temp->next;
+	}
+	gethostname(hostname, 30);
+	if (!strcmp(temp_host, hostname)){
+		return 1;
+	}
+	return 0;
+}
+
+/*
  * Client functionality part of client node
  */
 int peer_connect(char *ip_address)
 {
         int sock_fd;
 	struct sockaddr_in server_addr;
-	char send_buffer[1024];
-	char recv_buffer[1024];
-	int i;
-	int m;
+	char send_buffer[1024] = {0};
+	char recv_buffer[1024] = {0};
+	int i, m, rd;
 	int random = 0;
+	int check = 0;
+	int release_check = 0;
 	strcpy(send_buffer, "hello");
 
         if ((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
@@ -183,20 +340,43 @@ int peer_connect(char *ip_address)
 	no_of_conn++;
 	srand(time(0));
 
+	//infinite loop to let the client socket open untill the program ends
 	while (1){
-		//infinite loop to let the client socket open untill the program ends
+		//set check to 0 again once you got replies from all the other clients
+		if (peer_cli_replies >= 4){
+			check = 0;
+			release_check = 0;
+			local_clock++;
+			//local_clock_send_timer = 0;
+		}
 		random = (rand() % 10) +1;
 		sleep (random);
+
+		//Check if all servers and clients are connected
 		if (no_of_conn >= 7) {
-			if(cli_replies >= 4){
-				if (is_client_server_socket(sock_fd)){
+			if(peer_cli_replies >= 4){
+				if (is_client_to_server_socket(sock_fd) && is_local_request_head_of_queue()){
 					request_to_server_send(sock_fd);
+					/* set the peer_cli_replies back to 0 so that other client-to-server threads
+					 * dont send write request in parallel */
+					release_sent = 0;
+					peer_cli_replies = 0;
+					local_clock_send_timer = 0;
 				}
 			}
 			else {
-				if (!is_client_server_socket(sock_fd)){
-					cli_replies++;
+				if ((!is_client_to_server_socket(sock_fd)) && (check == 0) && (release_sent >= 4)){
 					client_send_request(sock_fd);
+					peer_cli_replies++;
+					/* So that the same client-to-client connection dosen't send requests multiple times
+					 * before gitting replies from other clients. */
+					check = 1;
+					release_check = 0;
+				}
+				else if ((!is_client_to_server_socket(sock_fd)) && (release_check == 0) && (release_sent < 4)){
+					send_release(sock_fd);
+					release_sent++;
+					release_check = 1;
 				}
 			}
 		}
@@ -212,68 +392,83 @@ int peer_connect(char *ip_address)
  */
 int request_to_server_send(int sock_fd)
 {
-	struct timestamp * temp = head;
-	int random;
-	char send_buffer[1024];
-	char recv_buffer[1024];
-	int fd = temp->socket_fd;
-	long int min = temp->t_stamp;
+	char send_buffer[1024] = {0};
 	char hst_nm[30];
 	char cli_id_temp[30];
-	
-	gethostname(hst_nm, 30);
-	
-	//get the min timestamp from the queue
-	while (temp != NULL){
-		if (min > temp->t_stamp){
-			if (!strncmp(hst_nm, temp->cli_id, 10)){
-				min = temp->t_stamp;
-				fd = temp->socket_fd;
-				strcpy(cli_id_temp, temp->cli_id);
-			}
-		}
-		temp = temp->next;
+
+	if (file_no == 1){
+		strcpy(send_buffer, "test1 ");
+		file_no = 2;
 	}
+	else {
+		strcpy(send_buffer, "test2 ");
+		file_no = 1;
+	}
+	gethostname(hst_nm, 30);
+	strcat(send_buffer, hst_nm);
+	strcat(send_buffer, " ");
+	sprintf(cli_id_temp, "%ld", local_clock_send_timer);
+	strcat(send_buffer, cli_id_temp);
+	if (send(sock_fd, send_buffer, strlen(send_buffer), 0) < 0){
+		fprintf(stderr,"clientsh: error in sending write request to server!!\n");
+	}
+	return 1;
+}
 
-	//chech if the client request is at the head of the queue
-	if (!strncmp(cli_id_tmp, hst_nm)){
-		srand(time(0));
-		random = (rand() % 2);
+/*
+ * send release after completing file write
+ */
 
-		
+void send_release(int sock_fd)
+{
+	 char send_buffer[1024] = {0};
+	 char ck[30];
+	 char hostname_temp[30];
+	 
+	 gethostname(hostname_temp, 30);
+	 strcpy(send_buffer, "release ");
+         strcat(send_buffer, hostname_temp);
+	 strcat(send_buffer, " ");
+	 sprintf(ck, "%ld", local_clock);
+	 strcat(send_buffer, ck);
+
+	if (send(sock_fd, send_buffer, strlen(send_buffer), 0) < 0){
+		fprintf(stderr,"clientsh: error in sending request to other client!!\n");
 	}
 
 }
+
 /*
  * Lamports mutual exclusion implementation. REQUEST send to other clients
  */
 void client_send_request(int sock_fd)
 {
-	struct timestamp *temp = (struct timestamp*) malloc(sizeof(struct timestamp));
-	char send_buffer[1024];
-	char recv_buffer[1024];
-	char ck[25];
+	struct request *temp = (struct request*) malloc(sizeof(struct request));
+	char send_buffer[1024] = {0};
+	char recv_buffer[1024] = {0};
+	char ck[30];
 	int rd;
-
-	temp->next = head;
-	temp->socket_fd = sock_fd;
-	//fetching the local clock time
-	//time_t t = time(NULL);
-	//long int t_temp = (long int) t;
-	temp->t_stamp = local_clock;
+	char hostname_temp[30];
 
 	//fetching the hostname
-	char hostname_temp[30];
 	gethostname(hostname_temp, 30);
-	strcpy(temp->cli_id, hostname_temp);
-
-	//copy filename to the structure.
-	head = temp;
+	
+	if (local_clock_send_timer == 0){
+		temp->next = head;
+		//temp->socket_fd = sock_fd;
+		//fetching the local clock time
+		temp->t_stamp = local_clock;
+		//copy hostname to the structure.
+		strcpy(temp->cli_id, hostname_temp);
+		head = temp;
+		local_clock_send_timer = local_clock;
+	}
 
 	//construct the message to be sent
-	strcpy(send_buffer, hostname_temp);
+	strcpy(send_buffer, "request ");
+	strcat(send_buffer, hostname_temp);
 	strcat(send_buffer, " ");
-	sprintf(ck, "%ld", local_clock);
+	sprintf(ck, "%ld", local_clock_send_timer);
 	strcat(send_buffer, ck);
 	
 	//Send request to other clients.

@@ -3,7 +3,7 @@ CC=gcc
 CFLAGS=-I$(IDIR)
 ODIR=obj
 
-_DEPS = clientsh.h
+_DEPS = client.h
 DEPS = $(patsubst %,$(IDIR)/%,$(_DEPS))
 
 _OBJ = clientsh.o client.o 
